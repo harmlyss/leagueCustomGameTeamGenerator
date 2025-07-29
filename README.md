@@ -14,7 +14,7 @@ Plans to add:
 - Rescrambling of teams
   - If the teams generated are not satisfactory
 - Changing of fairness setting
- - So a restart is not required
+  - So a restart is not required
 - Skill evaluation based on ranked rank
   - To allow for more fair balancing
 - Skill evaluation based on combination of ranked rank and level
