@@ -12,6 +12,7 @@ from enum import Enum, auto
 import hashlib
 
 from z3 import Solver, IntVector, Distinct, Or, Sum, Bool, sat, If
+import numpy as np
 
 DEBUG = False
 fairness = 10 #Will generate this number of sets of two teams with randomly scrambled players, then pick the closest skill match. Higher numbers means more "perfectly" matched teams but less variation
@@ -59,7 +60,7 @@ ranksDisplay = {
 }
 
 def strike(text):
-    return ''.join([u'\u0336{}'.format(c) for c in text])
+	return ''.join([u'\u0336{}'.format(c) for c in text])
 
 def scrambleAgents(agents):
 	scrambledAgents = []
@@ -121,8 +122,7 @@ class DataDragonCache:
 		return self.version
 
 
-
-class ConstraintChampionSampler:
+class ChampionSampler:
 	def __init__(self, champ_data: dict[str, dict]):
 		self.champs = list(champ_data.keys())
 		self.champ_to_tags = {
@@ -133,7 +133,7 @@ class ConstraintChampionSampler:
 	def _build_tag_table(self):
 		"""
 		Builds a dict: tag -> [bool list], where bool_list[i] = champ[i] has the tag
-        """
+		"""
 		tag_map = {}
 		for i, champ in enumerate(self.champs):
 			for tag in self.champ_to_tags[champ]:
@@ -174,6 +174,29 @@ class ConstraintChampionSampler:
 			solver.add(Or([v != model.evaluate(v) for v in indices]))
 		return models
 
+	def search(self, tag_targets: dict[str, ChampTag] = None, num_slots: int = 10):
+		if tag_targets is None:
+			# Just return 10 random champs
+			return np.random.choice(self.champs, (num_slots,))
+		# Otherwise do an iterative greedy search through a random shuffle of the champs
+		np.random.shuffle(self.champs)
+		self._build_tag_table()
+		tag_counter = Counter()
+		champ_choices = []
+		for champ in self.champs:
+			tags = self.champ_to_tags[champ]
+			valid_champ = False
+			for tag in tags:
+				if tag_counter.get(tag, 0) == tag_targets[tag]:
+					break
+				valid_champ = True
+			if valid_champ:
+				tag_counter.update(tags)
+				champ_choices.append(champ)
+				if len(champ_choices) == num_slots:
+					break
+		return champ_choices
+
 class DataDragon:
 	"""
 	Wrapper around the RIOT data dragon centralized asset cdn
@@ -192,10 +215,21 @@ class DataDragon:
 	
 	def get_champion_list(self, role_distribution: dict[ChampTag, int], max_choices: int = 100) -> list[str]:
 		champ_data = self._cdn_request(CDNEndpoint.CHAMPION_LIST)['data']
-		sampler = ConstraintChampionSampler(champ_data)
+		sampler = ChampionSampler(champ_data)
 		champs = sampler.solve(role_distribution, max_choices)
 		self.validate_solutions(champs, champ_data, role_distribution)
 		return random.choice(champs)
+
+	def get_champion_list_weak(self, role_distribution: dict[ChampTag, int]) -> list[str]:
+		"""
+		Does a very quick search of the champ list but doesn't strictly adhere to finding exact role distribution.
+		Instead it will just make sure the resulting champ list doesn't have _too many_ of a particular role.
+		"""
+		champ_data = self._cdn_request(CDNEndpoint.CHAMPION_LIST)['data']
+		sampler = ChampionSampler(champ_data)
+		champs = sampler.search(role_distribution)
+		# self.validate_solutions([champs], champ_data, role_distribution)
+		return champs
 	
 	def validate_solutions(self, champ_name_lists: list[list[str]], champ_data: dict[str, dict], tag_targets: dict[ChampTag, int]) -> bool:
 		"""
@@ -287,6 +321,8 @@ def aram_champ_selector():
 	}
 	champ_list = dd.get_champion_list(roles, 100)
 	print(champ_list)
+	champ_list_weak = dd.get_champion_list_weak(roles)
+	print(champ_list_weak)
 
 def form_balanced_teams():
 	#Lets ask how rough the teams generated should be
